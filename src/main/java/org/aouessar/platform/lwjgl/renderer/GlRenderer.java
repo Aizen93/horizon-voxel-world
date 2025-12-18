@@ -1,7 +1,7 @@
 package org.aouessar.platform.lwjgl.renderer;
 
 import org.aouessar.core.math.Mat4;
-import org.aouessar.core.mesh.FaceCullingMesher;
+import org.aouessar.core.mesh.GreedyMesher;
 import org.aouessar.core.streaming.ChunkMeshReady;
 import org.aouessar.core.streaming.StreamingWorld;
 import org.aouessar.core.world.*;
@@ -11,7 +11,7 @@ import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 
 import static org.lwjgl.glfw.GLFW.*;
-import static org.lwjgl.opengl.GL33.*;
+import static org.lwjgl.opengl.GL33.glViewport;
 
 public final class GlRenderer {
     private final long window;
@@ -54,8 +54,10 @@ public final class GlRenderer {
 
         // Core world setup
         WorldSeed seed = new WorldSeed(123456789L);
-        WorldGenerator gen = new SimpleWorldGenerator(seed, 48);
-        world = new StreamingWorld(gen, new FaceCullingMesher(), Math.max(2, Runtime.getRuntime().availableProcessors() - 1));
+        WorldGenerator gen = new SimpleWorldGenerator(seed, 72);
+
+        //world = new StreamingWorld(gen, new FaceCullingMesher(), Math.max(2, Runtime.getRuntime().availableProcessors() - 1)); // World using Face Culling
+        world = new StreamingWorld(gen, new GreedyMesher(), Math.max(2, Runtime.getRuntime().availableProcessors() - 1)); // World using Greedy Mesher
     }
 
     public void render(float dt) {
@@ -81,7 +83,7 @@ public final class GlRenderer {
             // empty mesh (air chunk) => skip
             if (m.indexCount() == 0) continue;
 
-            float[] inter = MeshInterop.toInterleavedPosNrmUv(m);
+            float[] inter = MeshInterop.toInterleaved(m);
             float minX = r.pos().cx() * Chunk.SIZE;
             float minY = r.pos().cy() * Chunk.SIZE;
             float minZ = r.pos().cz() * Chunk.SIZE;
@@ -89,7 +91,7 @@ public final class GlRenderer {
             float maxY = minY + Chunk.SIZE;
             float maxZ = minZ + Chunk.SIZE;
 
-            GlMesh gl = new GlMesh(inter, m.indices, minX,minY,minZ, maxX,maxY,maxZ);
+            GlMesh gl = new GlMesh(inter, m.indices, minX, minY, minZ, maxX, maxY, maxZ);
 
             GlMesh old = gpuMeshes.put(r.pos(), gl);
             if (old != null) old.dispose();
@@ -170,41 +172,70 @@ public final class GlRenderer {
 
     // -------- Shaders --------
     private static final String VS = """
-    #version 330 core
-    layout(location=0) in vec3 aPos;
-    layout(location=1) in vec3 aNrm;
-    layout(location=2) in vec2 aUv;
+        #version 330 core
+        layout(location=0) in vec3 aPos;
+        layout(location=1) in vec3 aNrm;
+        layout(location=2) in vec2 aUv;
+        layout(location=3) in float aMat;
+        uniform mat4 uVP;
 
-    uniform mat4 uVP;
+        out vec3 vNrm;
+        flat out float vMat;
 
-    out vec3 vNrm;
-    out vec2 vUv;
-
-    void main() {
-      vNrm = aNrm;
-      vUv = aUv;
-      gl_Position = uVP * vec4(aPos, 1.0);
-    }
-  """;
+        void main() {
+        vNrm = aNrm;
+        vMat = aMat;
+        gl_Position = uVP * vec4(aPos, 1.0);
+        }
+    """;
 
     private static final String FS = """
-    #version 330 core
-    in vec3 vNrm;
-    in vec2 vUv;
-
-    out vec4 FragColor;
-
-    void main() {
-      vec3 n = normalize(vNrm);
-      vec3 lightDir = normalize(vec3(0.6, 1.0, 0.2));
-      float ndl = max(dot(n, lightDir), 0.15);
-
-      float sx = floor(vUv.x * 8.0);
-      float sy = floor(vUv.y * 8.0);
-      float c = mod(sx + sy, 2.0);
-
-      vec3 base = mix(vec3(0.18,0.65,0.25), vec3(0.35,0.25,0.18), c);
-      FragColor = vec4(base * ndl, 1.0);
-    }
-  """;
+        #version 330 core
+         in vec3 vNrm;
+         flat in float vMat;
+    
+         out vec4 FragColor;
+    
+         vec3 materialColor(float id, float height) {
+           id = abs(id);
+    
+           if (id < 0.5) return vec3(0.0); // air
+    
+           // height tint: helps the terrain read from far
+           float h = clamp((height - 20.0) / 120.0, 0.0, 1.0);
+    
+           if (id < 1.5) { // grass
+             return mix(vec3(0.12, 0.55, 0.18), vec3(0.25, 0.80, 0.30), h);
+           }
+           if (id < 2.5) { // dirt
+             return vec3(0.50, 0.32, 0.16);
+           }
+           if (id < 3.5) { // stone
+             return vec3(0.62, 0.62, 0.66);
+           }
+           // water
+           return vec3(0.10, 0.35, 0.75);
+         }
+    
+         void main() {
+           vec3 n = normalize(vNrm);
+    
+           // lighting
+           vec3 lightDir = normalize(vec3(0.6, 1.0, 0.2));
+           float ndl = max(dot(n, lightDir), 0.12);
+    
+           // steepness factor (vertical faces darker)
+           float upness = clamp(dot(n, vec3(0,1,0)), 0.0, 1.0);
+           float slopeDark = mix(0.65, 1.0, upness);
+    
+           // We don't have world position in FS yet; so approximate height by using normal only isn't enough.
+           // Quick trick: encode height into UV.y in the CPU later (next step).
+           // For now, keep height constant:
+           float fakeHeight = 60.0;
+    
+           vec3 base = materialColor(vMat, fakeHeight);
+    
+           FragColor = vec4(base * ndl * slopeDark, 1.0);
+         }
+    """;
 }

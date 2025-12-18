@@ -8,6 +8,9 @@ public final class SimpleWorldGenerator implements WorldGenerator {
     public SimpleWorldGenerator(WorldSeed seed, int seaLevel) {
         this.seed = seed.value();
         this.seaLevel = seaLevel;
+        System.out.println("BlockId class used by generator = " + BlockId.class.getName());
+        System.out.println("BlockId values: AIR=" + BlockId.AIR + " GRASS=" + BlockId.GRASS
+                + " DIRT=" + BlockId.DIRT + " STONE=" + BlockId.STONE + " WATER=" + BlockId.WATER);
     }
 
     @Override

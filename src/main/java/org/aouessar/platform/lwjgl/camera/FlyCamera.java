@@ -6,7 +6,7 @@ import org.aouessar.core.math.Vec3;
 import static org.lwjgl.glfw.GLFW.*;
 
 public final class FlyCamera {
-    public final Vec3 position = new Vec3(0, 40, 0);
+    public final Vec3 position = new Vec3(0, 140, 0);
 
     private float yaw = -90f;   // looking toward -Z
     private float pitch = -15f;
