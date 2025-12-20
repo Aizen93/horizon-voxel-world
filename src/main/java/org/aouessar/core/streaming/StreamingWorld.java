@@ -7,6 +7,8 @@ import org.aouessar.core.world.*;
 import java.util.*;
 import java.util.concurrent.*;
 
+import static org.aouessar.utils.Utils.TILE_SIZE;
+
 public final class StreamingWorld {
     private final WorldGenerator generator;
     private final Mesher mesher;
@@ -40,7 +42,7 @@ public final class StreamingWorld {
     }
 
     public List<ChunkMeshReady> pollReadyMeshes(int max) {
-        ArrayList<ChunkMeshReady> out = new ArrayList<>(Math.min(max, 256));
+        ArrayList<ChunkMeshReady> out = new ArrayList<>(Math.min(max, TILE_SIZE));
         for (int i = 0; i < max; i++) {
             ChunkMeshReady r = readyMeshes.poll();
             if (r == null) break;

@@ -46,5 +46,11 @@ public final class ShaderProgram {
         memFree(fb);
     }
 
+    public void setVec3(String name, float x, float y, float z) {
+        int loc = glGetUniformLocation(programId, name);
+        if (loc < 0) return;
+        glUniform3f(loc, x, y, z);
+    }
+
     public void dispose() { glDeleteProgram(programId); }
 }

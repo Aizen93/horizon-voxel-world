@@ -5,6 +5,7 @@ import org.aouessar.core.world.Chunk;
 import org.aouessar.core.world.WorldGenerator;
 
 import java.util.ArrayList;
+import java.util.List;
 
 public final class GreedyMesher implements Mesher {
 
@@ -221,17 +222,17 @@ public final class GreedyMesher implements Mesher {
         mat.add(materialId);
     }
 
-    private static float[] toFloatArray(ArrayList<Float> list) {
+    public static float[] toFloatArray(List<Float> list) {
         float[] a = new float[list.size()];
         for (int i = 0; i < a.length; i++) a[i] = list.get(i);
         return a;
     }
-    private static int[] toIntArray(ArrayList<Integer> list) {
+    public static int[] toIntArray(List<Integer> list) {
         int[] a = new int[list.size()];
         for (int i = 0; i < a.length; i++) a[i] = list.get(i);
         return a;
     }
-    private static short[] toShortArray(ArrayList<Short> list) {
+    public static short[] toShortArray(List<Short> list) {
         short[] a = new short[list.size()];
         for (int i = 0; i < a.length; i++) a[i] = list.get(i);
         return a;
