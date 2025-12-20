@@ -16,10 +16,10 @@ final class FarTileBuilder {
     // LOD -> grid step in blocks
     private static int stepForLod(int lod) {
         return switch (lod) {
-            case 0 -> 2;
-            case 1 -> 4;
-            case 2 -> 8;
-            default -> 16;
+            case 0 -> 4;
+            case 1 -> 8;
+            case 2 -> 16;
+            default -> 128;
         };
     }
 

@@ -40,13 +40,13 @@ public final class GlRenderer {
 
     private final FarField far;
     private final ConcurrentHashMap<TilePos, GlMesh> farGpuMeshes = new ConcurrentHashMap<>();
-    private final int farUploadPerFrame = 2;
-    // Tile radii (in tiles)
-    private final int farRadiusLod0 = 6;
-    private final int farRadiusLod1 = 14;
-    private final int farRadiusLod2 = 30;
-    private final int farRadiusLod3 = 60;
     int sea = 72;
+    private int lastFarCx = Integer.MIN_VALUE;
+    private int lastFarCz = Integer.MIN_VALUE;
+    private float farCatchupSeconds = 0f;
+    private float prevCamX, prevCamZ;
+    private float camVx, camVz;
+    private float camSpeed;
 
 
 
@@ -89,6 +89,18 @@ public final class GlRenderer {
         camera.handleMouse(window);
         camera.updateMovement(window, dt);
 
+        float x = camera.position.x;
+        float z = camera.position.z;
+
+        if (dt > 0f) {
+            camVx = (x - prevCamX) / dt;
+            camVz = (z - prevCamZ) / dt;
+            camSpeed = (float) Math.sqrt(camVx * camVx + camVz * camVz);
+        }
+
+        prevCamX = x;
+        prevCamZ = z;
+
         // 1) Request chunks around camera
         requestRingAroundCamera();
         requestFarTilesAroundCamera();
@@ -122,7 +134,12 @@ public final class GlRenderer {
             evictFarTiles(cx, cz, 20);
         }
 
-        for (FarTileReady r : far.pollReady(farUploadPerFrame)) {
+        int uploads = 6;
+        if (camSpeed > 600f)  uploads = 20;
+        if (camSpeed > 1200f) uploads = 40;
+        if (camSpeed > 2000f) uploads = 60;
+
+        for (FarTileReady r : far.pollReady(uploads)) {
             var m = r.mesh();
             if (m.indexCount() == 0) continue;
 
@@ -133,8 +150,8 @@ public final class GlRenderer {
             float maxX = minX + TILE_SIZE;
             float maxZ = minZ + TILE_SIZE;
 
-            float minY = -64f;
-            float maxY = 300f;
+            float minY = -512f;
+            float maxY = 2048f;
 
             GlMesh gl = new GlMesh(inter, m.indices,
                     minX, minY, minZ,
@@ -232,49 +249,65 @@ public final class GlRenderer {
     }
 
     private void requestFarTilesAroundCamera() {
-        int cx = floorDiv((int)camera.position.x, TILE_SIZE);
-        int cz = floorDiv((int)camera.position.z, TILE_SIZE);
+        final int TILE = TILE_SIZE;
+        float lookAhead = Math.min(12000f, 2.5f * camSpeed);
+        float dirX = (camSpeed > 0.001f) ? (camVx / camSpeed) : 0f;
+        float dirZ = (camSpeed > 0.001f) ? (camVz / camSpeed) : 0f;
 
-        // distance in TILE units
-        requestBand(cx, cz, 0, 0, 2);    // LOD0: closest
-        requestBand(cx, cz, 1, 3, 5);    // LOD1
-        requestBand(cx, cz, 2, 6, 9);    // LOD2
-        requestBand(cx, cz, 3, 10, 14);  // LOD3 (far horizon)
+        float preX = camera.position.x + dirX * lookAhead;
+        float preZ = camera.position.z + dirZ * lookAhead;
 
-        evictFarTiles(cx, cz, 20);
-    }
+        int cx = floorDiv((int)Math.floor(preX), TILE);
+        int cz = floorDiv((int)Math.floor(preZ), TILE);
 
+        final int keepRadius = 70;   // keep a bit more than the far ring
 
-    private void requestLodRing(int tx, int tz, int lod, int radius) {
-        int r2 = radius * radius;
-        for (int dz = -radius; dz <= radius; dz++) {
-            for (int dx = -radius; dx <= radius; dx++) {
-                if (dx*dx + dz*dz > r2) continue;
-                far.request(new TilePos(lod, tx + dx, tz + dz));
-            }
+        // Detect center shift (moving into a new tile)
+        if (cx != lastFarCx || cz != lastFarCz) {
+            lastFarCx = cx;
+            lastFarCz = cz;
+
+            // Purge stale work so the scheduler focuses on the new area immediately
+            far.dropPendingOutside(cx, cz, keepRadius);
+            far.dropReadyOutside(cx, cz, keepRadius); // add this method below
+
+            // Trigger a short burst so far tiles catch up quickly
+            farCatchupSeconds = 0.8f;
         }
+
+        // Always evict GPU meshes outside keep radius
+        evictFarTiles(cx, cz, keepRadius);
+
+        // Budgets: burst when we shifted, otherwise normal
+        int requestBudget = (farCatchupSeconds > 0f) ? 600 : 200;
+
+        // Schedule rings (same as before, but with a larger outer band)
+        enqueueBand(cx, cz, 0, 0, 2, 0, requestBudget);        // LOD0
+        enqueueBand(cx, cz, 1, 2, 5, 10_000, requestBudget);   // LOD1
+        enqueueBand(cx, cz, 2, 5, 12, 20_000, requestBudget);  // LOD2
+        enqueueBand(cx, cz, 3, 16, 64, 30_000, requestBudget); // LOD3
     }
 
-    private void requestBand(int cx, int cz, int lod, int rMin, int rMax) {
-        List<TilePos> list = new ArrayList<>();
+
+    private void enqueueBand(int cx, int cz, int lod, int rMin, int rMax, int lodWeight, int budget) {
+        int rMin2 = rMin * rMin;
+        int rMax2 = rMax * rMax;
 
         for (int dz = -rMax; dz <= rMax; dz++) {
             for (int dx = -rMax; dx <= rMax; dx++) {
                 int d2 = dx*dx + dz*dz;
-                if (d2 < rMin*rMin || d2 > rMax*rMax) continue;
-                list.add(new TilePos(lod, cx + dx, cz + dz));
+                if (d2 < rMin2 || d2 > rMax2) continue;
+                if (budget-- <= 0) return;
+
+                TilePos p = new TilePos(lod, cx + dx, cz + dz);
+                if (farGpuMeshes.containsKey(p)) continue;
+                if (far.isInFlight(p)) continue;
+
+                int seamBonus = (d2 - rMin2); // small => closer to seam => earlier
+                int priority = lodWeight + d2 * 100 + seamBonus;
+
+                far.enqueue(p, priority);
             }
-        }
-
-        // SORT BY DISTANCE (nearest first)
-        list.sort(Comparator.comparingInt(p -> {
-            int dx = p.tx() - cx;
-            int dz = p.tz() - cz;
-            return dx*dx + dz*dz;
-        }));
-
-        for (TilePos p : list) {
-            far.request(p);
         }
     }
 
