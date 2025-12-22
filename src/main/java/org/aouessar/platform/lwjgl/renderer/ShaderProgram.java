@@ -35,7 +35,9 @@ public final class ShaderProgram {
         return id;
     }
 
-    public void use() { glUseProgram(programId); }
+    public void use() {
+        glUseProgram(programId);
+    }
 
     public void setMat4(String name, float[] m16) {
         int loc = glGetUniformLocation(programId, name);
@@ -52,5 +54,13 @@ public final class ShaderProgram {
         glUniform3f(loc, x, y, z);
     }
 
-    public void dispose() { glDeleteProgram(programId); }
+    public void setFloat(String name, float v) {
+        int loc = glGetUniformLocation(programId, name);
+        if (loc < 0) return;
+        glUniform1f(loc, v);
+    }
+
+    public void dispose() {
+        glDeleteProgram(programId);
+    }
 }

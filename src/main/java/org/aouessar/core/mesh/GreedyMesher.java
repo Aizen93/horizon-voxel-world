@@ -15,7 +15,7 @@ public final class GreedyMesher implements Mesher {
         ArrayList<Float> nrm = new ArrayList<>();
         ArrayList<Float> uv  = new ArrayList<>();
         ArrayList<Integer> idx = new ArrayList<>();
-        ArrayList<Short> mat = new ArrayList<>();
+        ArrayList<Float> mat = new ArrayList<>();
 
         int baseX = chunk.pos.cx() * Chunk.SIZE;
         int baseY = chunk.pos.cy() * Chunk.SIZE;
@@ -118,7 +118,7 @@ public final class GreedyMesher implements Mesher {
                 toFloatArray(nrm),
                 toFloatArray(uv),
                 toIntArray(idx),
-                toShortArray(mat)
+                toFloatArray(mat)
         );
     }
 
@@ -142,7 +142,7 @@ public final class GreedyMesher implements Mesher {
 
     private static int emitQuad(
             ArrayList<Float> pos, ArrayList<Float> nrm, ArrayList<Float> uv,
-            ArrayList<Integer> idx, ArrayList<Short> mat,
+            ArrayList<Integer> idx, ArrayList<Float> mat,
             int indexBase,
             int baseX, int baseY, int baseZ,
             int[] x, int[] du, int[] dv, int d,
@@ -211,7 +211,7 @@ public final class GreedyMesher implements Mesher {
     }
 
     private static void pushVertex(ArrayList<Float> pos, ArrayList<Float> nrm, ArrayList<Float> uv,
-                                   ArrayList<Short> mat,
+                                   ArrayList<Float> mat,
                                    float x,float y,float z,
                                    float nx,float ny,float nz,
                                    float u,float v,
@@ -219,7 +219,7 @@ public final class GreedyMesher implements Mesher {
         pos.add(x); pos.add(y); pos.add(z);
         nrm.add(nx); nrm.add(ny); nrm.add(nz);
         uv.add(u); uv.add(v);
-        mat.add(materialId);
+        mat.add((float) materialId);
     }
 
     public static float[] toFloatArray(List<Float> list) {
@@ -227,11 +227,13 @@ public final class GreedyMesher implements Mesher {
         for (int i = 0; i < a.length; i++) a[i] = list.get(i);
         return a;
     }
+
     public static int[] toIntArray(List<Integer> list) {
         int[] a = new int[list.size()];
         for (int i = 0; i < a.length; i++) a[i] = list.get(i);
         return a;
     }
+
     public static short[] toShortArray(List<Short> list) {
         short[] a = new short[list.size()];
         for (int i = 0; i < a.length; i++) a[i] = list.get(i);

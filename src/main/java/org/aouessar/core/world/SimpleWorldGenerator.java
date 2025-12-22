@@ -15,49 +15,70 @@ public final class SimpleWorldGenerator implements WorldGenerator {
 
     @Override
     public short blockAt(int wx, int wy, int wz) {
-        if (wy < 0) return BlockId.STONE;
-
         int h = heightAt(wx, wz);
 
+        // Above surface
         if (wy > h) {
             return (wy <= seaLevel) ? BlockId.WATER : BlockId.AIR;
         }
 
-        // ground layers
-        if (wy == h) return BlockId.GRASS;
-        if (wy >= h - 3) return BlockId.DIRT;
+        // Surface (must be BEFORE subsurface checks)
+        if (wy == h) {
+            if (h <= seaLevel + 1) return BlockId.SAND;
+            return BlockId.GRASS;
+        }
+
+        // Subsurface band
+        if (wy >= h - 3) {
+            return BlockId.DIRT;
+        }
+
+        // Deep
         return BlockId.STONE;
     }
 
+
+    @Override
     public int heightAt(int x, int z) {
-        // Simple FBM value noise => mountains + variation.
-        float n1 = fbm2(x * 0.004f, z * 0.004f, 5, 2.0f, 0.5f);
-        float n2 = fbm2(x * 0.0015f, z * 0.0015f, 4, 2.0f, 0.55f);
+        // Continents (very low frequency)
+        float c = fbm(x * 0.0015f, z * 0.0015f, 4, 2.0f, 0.5f);
+        c = (c + 1f) * 0.5f; // [0..1]
 
-        float base = 40f;
-        float hills = n1 * 35f;
-        float mountains = (float)Math.pow(Math.max(0f, n2), 1.7) * 80f;
+        // Detail (higher frequency)
+        float d = fbm(x * 0.01f, z * 0.01f, 5, 2.1f, 0.5f);
+        d = (d + 1f) * 0.5f; // [0..1]
 
-        return (int)(base + hills + mountains);
+        // Blend: continents define base, detail adds bumps
+        float base = 25f + c * 70f;
+        float bumps = (d - 0.5f) * 18f;
+
+        int h = Math.round(base + bumps);
+
+        // clamp to world range (defensive)
+        if (h < 1) h = 1;
+        if (h >= org.aouessar.utils.Utils.WORLD_MAX_Y) h = org.aouessar.utils.Utils.WORLD_MAX_Y - 1;
+
+        return h;
     }
 
-    private float fbm2(float x, float z, int octaves, float lacunarity, float gain) {
+    // -------------------- Noise --------------------
+
+    private float fbm(float x, float z, int octaves, float lacunarity, float gain) {
         float amp = 1f;
         float freq = 1f;
         float sum = 0f;
         float norm = 0f;
 
         for (int i = 0; i < octaves; i++) {
-            sum += amp * valueNoise2(x * freq, z * freq);
+            sum += amp * noise2(x * freq, z * freq);
             norm += amp;
             amp *= gain;
             freq *= lacunarity;
         }
-        return sum / norm; // 0..1-ish
+        return (norm == 0f) ? 0f : (sum / norm);
     }
 
-    // Deterministic 2D value noise (0..1), smooth interpolated.
-    private float valueNoise2(float x, float z) {
+    private float noise2(float x, float z) {
         int x0 = fastFloor(x);
         int z0 = fastFloor(z);
         int x1 = x0 + 1;
@@ -66,30 +87,46 @@ public final class SimpleWorldGenerator implements WorldGenerator {
         float tx = x - x0;
         float tz = z - z0;
 
-        float v00 = hash01(x0, z0);
-        float v10 = hash01(x1, z0);
-        float v01 = hash01(x0, z1);
-        float v11 = hash01(x1, z1);
-
         float sx = smoothstep(tx);
         float sz = smoothstep(tz);
 
-        float a = lerp(v00, v10, sx);
-        float b = lerp(v01, v11, sx);
-        return lerp(a, b, sz);
+        float n00 = gradDot(x0, z0, tx, tz);
+        float n10 = gradDot(x1, z0, tx - 1f, tz);
+        float n01 = gradDot(x0, z1, tx, tz - 1f);
+        float n11 = gradDot(x1, z1, tx - 1f, tz - 1f);
+
+        float nx0 = lerp(n00, n10, sx);
+        float nx1 = lerp(n01, n11, sx);
+
+        return lerp(nx0, nx1, sz);
     }
 
-    private float hash01(int x, int z) {
+    private float gradDot(int xi, int zi, float x, float z) {
+        long h = hash2(xi, zi, seed);
+
+        // 8 directions (unit-ish), chosen by low bits
+        return switch ((int) (h & 7L)) {
+            case 0 -> x + z;
+            case 1 -> -x + z;
+            case 2 -> x - z;
+            case 3 -> -x - z;
+            case 4 -> x;
+            case 5 -> -x;
+            case 6 -> z;
+            default -> -z;
+        };
+    }
+
+    private static long hash2(int x, int z, long seed) {
         long h = seed;
-        h ^= x * 0x9E3779B97F4A7C15L;
-        h ^= z * 0xC2B2AE3D27D4EB4FL;
+        h ^= (long) x * 0x9E3779B97F4A7C15L;
+        h ^= (long) z * 0xC2B2AE3D27D4EB4FL;
         h ^= (h >>> 33);
         h *= 0xFF51AFD7ED558CCDL;
         h ^= (h >>> 33);
         h *= 0xC4CEB9FE1A85EC53L;
         h ^= (h >>> 33);
-        // Map to [0,1)
-        return (h & 0xFFFFFF) / (float)0x1000000;
+        return h;
     }
 
     private static float lerp(float a, float b, float t) {

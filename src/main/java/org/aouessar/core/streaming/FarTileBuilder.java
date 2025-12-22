@@ -8,7 +8,7 @@ import org.aouessar.core.world.WorldGenerator;
 import java.util.ArrayList;
 
 import static org.aouessar.core.mesh.GreedyMesher.*;
-import static org.aouessar.utils.Utils.TILE_SIZE;
+import static org.aouessar.utils.Utils.*;
 
 final class FarTileBuilder {
     private FarTileBuilder() {}
@@ -16,10 +16,10 @@ final class FarTileBuilder {
     // LOD -> grid step in blocks
     private static int stepForLod(int lod) {
         return switch (lod) {
-            case 0 -> 4;
-            case 1 -> 8;
-            case 2 -> 16;
-            default -> 128;
+            case 0 -> FAR_LOD0_STEP;
+            case 1 -> FAR_LOD1_STEP;
+            case 2 -> FAR_LOD2_STEP;
+            default -> FAR_LOD3_STEP;
         };
     }
 
@@ -36,7 +36,9 @@ final class FarTileBuilder {
         ArrayList<Float> nrm = new ArrayList<>();
         ArrayList<Float> uv  = new ArrayList<>();
         ArrayList<Integer> idx = new ArrayList<>();
-        ArrayList<Short> mat = new ArrayList<>();
+
+        // per-vertex material id as float (matches MeshData + MeshInterop layout)
+        ArrayList<Float> mat = new ArrayList<>();
 
         int[][] height = new int[vertsZ][vertsX];
 
@@ -50,20 +52,28 @@ final class FarTileBuilder {
                 height[z][x] = h;
 
                 pos.add((float) wx);
-                pos.add((float) h - 0.15f);
+                pos.add((float) h - FAR_Y_BIAS);
                 pos.add((float) wz);
 
-                uv.add(x / (float)(vertsX - 1));
-                uv.add(z / (float)(vertsZ - 1));
+                // biome noise in uv.x, normalized height in uv.y
+                float biome = biomeNoise01(wx >> FAR_BIOME_SHIFT, wz >> FAR_BIOME_SHIFT); // 0..1
+                float hNorm = clamp01((h - FAR_HEIGHT_NORM_MIN) / FAR_HEIGHT_NORM_RANGE); // 0..1
 
-                mat.add(((h <= seaLevel) ? BlockId.WATER : BlockId.GRASS));
+                uv.add(biome);
+                uv.add(hNorm);
+
+                short topMat;
+                if (h <= seaLevel) topMat = BlockId.WATER;
+                else if (h <= seaLevel + 1) topMat = BlockId.SAND;   // beach band
+                else topMat = BlockId.GRASS;
+
+                // store as float per vertex
+                mat.add((float) topMat);
 
                 // placeholder normal (fixed later)
                 nrm.add(0f); nrm.add(1f); nrm.add(0f);
             }
         }
-
-        int baseVertexCount = pos.size() / 3;
 
         // --- NORMALS ---
         for (int z = 0; z < vertsZ; z++) {
@@ -77,12 +87,13 @@ final class FarTileBuilder {
                 float ny = 2f * step;
                 float nz = height[zm][x] - height[zp][x];
 
-                float inv = 1f / (float)Math.sqrt(nx*nx + ny*ny + nz*nz);
+                float inv = 1f / (float) Math.sqrt(nx * nx + ny * ny + nz * nz);
+
                 int i = z * vertsX + x;
 
-                nrm.set(i*3,     nx * inv);
-                nrm.set(i*3 + 1, ny * inv);
-                nrm.set(i*3 + 2, nz * inv);
+                nrm.set(i * 3,     nx * inv);
+                nrm.set(i * 3 + 1, ny * inv);
+                nrm.set(i * 3 + 2, nz * inv);
             }
         }
 
@@ -94,81 +105,118 @@ final class FarTileBuilder {
                 int i2 = i0 + vertsX;
                 int i3 = i2 + 1;
 
+                // two triangles
                 idx.add(i0); idx.add(i2); idx.add(i1);
                 idx.add(i1); idx.add(i2); idx.add(i3);
             }
         }
 
         // --- SKIRTS ---
-        float skirtDepth = 40f;
+        float skirtDepth = FAR_SKIRT_DEPTH;
 
-        addSkirt(pos,nrm,uv,idx,mat, vertsX,vertsZ, baseVertexCount, skirtDepth, 0); // north
-        addSkirt(pos,nrm,uv,idx,mat, vertsX,vertsZ, baseVertexCount, skirtDepth, 1); // south
-        addSkirt(pos,nrm,uv,idx,mat, vertsX,vertsZ, baseVertexCount, skirtDepth, 2); // west
-        addSkirt(pos,nrm,uv,idx,mat, vertsX,vertsZ, baseVertexCount, skirtDepth, 3); // east
+        addSkirt(pos, nrm, uv, idx, mat, vertsX, vertsZ, skirtDepth, 0); // north
+        addSkirt(pos, nrm, uv, idx, mat, vertsX, vertsZ, skirtDepth, 1); // south
+        addSkirt(pos, nrm, uv, idx, mat, vertsX, vertsZ, skirtDepth, 2); // west
+        addSkirt(pos, nrm, uv, idx, mat, vertsX, vertsZ, skirtDepth, 3); // east
 
         return new MeshData(
                 toFloatArray(pos),
                 toFloatArray(nrm),
                 toFloatArray(uv),
                 toIntArray(idx),
-                toShortArray(mat)
+                toFloatArray(mat)
         );
     }
 
-
     private static int heightAt(WorldGenerator gen, int x, int z) {
-        // If your generator is SimpleWorldGenerator, prefer direct heightAt(x,z)
-        if (gen instanceof org.aouessar.core.world.SimpleWorldGenerator g) {
-            return g.heightAt(x, z);
-        }
-        // Fallback: scan downward (slow, but shouldn’t be used)
-        for (int y = TILE_SIZE; y >= -64; y--) {
-            if (gen.blockAt(x, y, z) != BlockId.AIR) return y;
-        }
-        return 0;
+        return gen.heightAt(x, z);
     }
 
     private static void addSkirt(
             ArrayList<Float> pos, ArrayList<Float> nrm, ArrayList<Float> uv,
-            ArrayList<Integer> idx, ArrayList<Short> mat,
-            int vertsX, int vertsZ, int base,
-            float depth, int edge
-    ) {
-        int count = pos.size() / 3;
+            ArrayList<Integer> idx, ArrayList<Float> mat,
+            int vertsX, int vertsZ, float skirtDepth, int dir) {
+        // dir: 0 north, 1 south, 2 west, 3 east
+        int start, count, step;
+        int[] normal = {0, 0, 0};
 
-        for (int i = 0; i < (edge < 2 ? vertsX : vertsZ); i++) {
-            int top;
-            if (edge == 0) top = i;                             // north
-            else if (edge == 1) top = (vertsZ-1)*vertsX + i;   // south
-            else if (edge == 2) top = i * vertsX;              // west
-            else top = i * vertsX + (vertsX - 1);              // east
+        switch (dir) {
+            case 0 -> {
+                start = 0;
+                count = vertsX;
+                step = 1;
+                normal[2] = -1;
+            }
+            case 1 -> {
+                start = (vertsZ - 1) * vertsX;
+                count = vertsX;
+                step = 1;
+                normal[2] = 1;
+            }
+            case 2 -> {
+                start = 0;
+                count = vertsZ;
+                step = vertsX;
+                normal[0] = -1;
+            }
+            default -> { // east edge (x=vertsX-1)
+                start = vertsX - 1;
+                count = vertsZ;
+                step = vertsX;
+                normal[0] = 1;
+            }
+        }
 
-            float x = pos.get(top * 3);
-            float y = pos.get(top * 3 + 1);
-            float z = pos.get(top * 3 + 2);
+        for (int i = 0; i < count; i++) {
+            int top = start + i * step;
 
-            float nx = nrm.get(top * 3);
-            float ny = nrm.get(top * 3 + 1);
-            float nz = nrm.get(top * 3 + 2);
+            float tx = pos.get(top * 3);
+            float ty = pos.get(top * 3 + 1);
+            float tz = pos.get(top * 3 + 2);
 
-            pos.add(x); pos.add(y - depth); pos.add(z);
-            nrm.add(nx); nrm.add(ny); nrm.add(nz);
-            uv.add(0f); uv.add(0f);
+            float topU = uv.get(top * 2);
+            float topV = uv.get(top * 2 + 1);
+
+            int bottom = (pos.size() / 3);
+
+            // bottom vertex
+            pos.add(tx);
+            pos.add(ty - skirtDepth);
+            pos.add(tz);
+
+            nrm.add((float) normal[0]);
+            nrm.add((float) normal[1]);
+            nrm.add((float) normal[2]);
+
+            uv.add(topU);
+            uv.add(topV);
+
+            // copy material id from the top vertex (per-vertex float)
             mat.add(mat.get(top));
 
-            if (i > 0) {
-                int a = top;
-                int b = top - (edge < 2 ? 1 : vertsX);
-                int c = count;
-                int d = count - 1;
+            // indices: connect top edge to bottom edge
+            if (i < count - 1) {
+                int top2 = start + (i + 1) * step;
 
-                idx.add(a); idx.add(c); idx.add(b);
-                idx.add(b); idx.add(c); idx.add(d);
+                int bottom2 = bottom + 1;
+
+                // quad as 2 triangles
+                idx.add(top);    idx.add(bottom);  idx.add(top2);
+                idx.add(top2);   idx.add(bottom);  idx.add(bottom2);
             }
-            count++;
         }
     }
 
-}
+    private static float clamp01(float v) {
+        return v < 0f ? 0f : (v > 1f ? 1f : v);
+    }
 
+    // Fast deterministic hash noise (value noise-ish), good enough for biomes
+    private static float biomeNoise01(int x, int z) {
+        int n = x * 374761393 + z * 668265263; // large primes
+        n = (n ^ (n >> 13)) * 1274126177;
+        n = n ^ (n >> 16);
+        // convert to 0..1
+        return (n & 0x7fffffff) / 2147483647.0f;
+    }
+}

@@ -72,4 +72,3 @@ public final class FlyCamera {
         return Mat4.lookAt(position, center, new Vec3(0,1,0));
     }
 }
-
