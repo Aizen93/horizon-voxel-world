@@ -14,4 +14,6 @@ public final class BlockId {
 
     public static final short WATER = 4;
 
+    public static final short SAND = 5;
+
 }

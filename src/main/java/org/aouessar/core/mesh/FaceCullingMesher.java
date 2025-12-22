@@ -6,6 +6,10 @@ import org.aouessar.core.world.WorldGenerator;
 
 import java.util.ArrayList;
 
+/**
+ * Face Culling is one solution to optimize meshes
+ * In this project I went with the {@link GreedyMesher} solution
+ */
 public final class FaceCullingMesher implements Mesher {
 
     @Override
@@ -14,7 +18,7 @@ public final class FaceCullingMesher implements Mesher {
         ArrayList<Float> nrm = new ArrayList<>();
         ArrayList<Float> uv  = new ArrayList<>();
         ArrayList<Integer> idx = new ArrayList<>();
-        ArrayList<Short> mat = new ArrayList<>();
+        ArrayList<Float> mat = new ArrayList<>();
 
         int baseX = chunk.pos.cx() * Chunk.SIZE;
         int baseY = chunk.pos.cy() * Chunk.SIZE;
@@ -48,7 +52,7 @@ public final class FaceCullingMesher implements Mesher {
                 toFloatArray(nrm),
                 toFloatArray(uv),
                 toIntArray(idx),
-                toShortArray(mat)
+                toFloatArray(mat)
         );
     }
 
@@ -88,11 +92,11 @@ public final class FaceCullingMesher implements Mesher {
 
     private static int emitFace(
             ArrayList<Float> pos, ArrayList<Float> nrm, ArrayList<Float> uv,
-            ArrayList<Integer> idx, ArrayList<Short> mat,
+            ArrayList<Integer> idx, ArrayList<Float> mat,
             int indexBase,
             int wx, int wy, int wz,
             Face f,
-            short materialId
+            float materialId
     ) {
         // Block is [wx..wx+1], etc.
         float x0 = wx, x1 = wx + 1f;
