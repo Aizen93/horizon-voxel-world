@@ -67,7 +67,7 @@ public final class ShaderProgram {
     }
 
     public void setVec4Array(String name, float[] data, int count) {
-        int loc = glGetUniformLocation(programId, name);
+        int loc = glGetUniformLocation(programId, name + "[0]");
         if (loc < 0) return;
         FloatBuffer fb = memAllocFloat(count * 4);
         fb.put(data, 0, count * 4).flip();
