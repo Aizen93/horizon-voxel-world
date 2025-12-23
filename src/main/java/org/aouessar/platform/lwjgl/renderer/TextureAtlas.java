@@ -29,16 +29,8 @@ final class TextureAtlas {
         while (matcher.find()) {
             String name = matcher.group(1);
             String body = matcher.group(2);
-            float x = readNumber(body, "x");
-            float y = readNumber(body, "y");
-            float w = readNumber(body, "w");
-            float h = readNumber(body, "h");
-
-            float u0 = x / atlasWidth;
-            float u1 = (x + w) / atlasWidth;
-            float v0 = 1f - (y + h) / atlasHeight;
-            float v1 = 1f - y / atlasHeight;
-            regions.put(name, new Region(u0, v0, u1, v1));
+            Region region = parseRegion(body, atlasWidth, atlasHeight);
+            regions.put(name, region);
         }
 
         if (regions.isEmpty()) {
@@ -46,6 +38,33 @@ final class TextureAtlas {
         }
 
         return new TextureAtlas(regions);
+    }
+
+    private static Region parseRegion(String body, float atlasWidth, float atlasHeight) {
+        // Prefer explicit normalized coords if present (atlas.json already stores u0/v0/u1/v1
+        // relative to a top-left origin). Otherwise fall back to x/y/w/h.
+        Float u0 = readNumberOrNull(body, "u0");
+        Float v0 = readNumberOrNull(body, "v0");
+        Float u1 = readNumberOrNull(body, "u1");
+        Float v1 = readNumberOrNull(body, "v1");
+
+        if (u0 != null && v0 != null && u1 != null && v1 != null) {
+            // Atlas JSON uses top-left origin; flip to bottom-left to match OpenGL coords
+            float flippedV0 = 1f - v1;
+            float flippedV1 = 1f - v0;
+            return new Region(u0, flippedV0, u1, flippedV1);
+        }
+
+        float x = readNumber(body, "x");
+        float y = readNumber(body, "y");
+        float w = readNumber(body, "w");
+        float h = readNumber(body, "h");
+
+        float calcU0 = x / atlasWidth;
+        float calcU1 = (x + w) / atlasWidth;
+        float calcV0 = 1f - (y + h) / atlasHeight;
+        float calcV1 = 1f - y / atlasHeight;
+        return new Region(calcU0, calcV0, calcU1, calcV1);
     }
 
     Region region(String name) {
@@ -100,6 +119,15 @@ final class TextureAtlas {
         Matcher matcher = pattern.matcher(body);
         if (!matcher.find()) {
             throw new IllegalStateException("Missing field " + key + " in atlas entry");
+        }
+        return Float.parseFloat(matcher.group(1));
+    }
+
+    private static Float readNumberOrNull(String body, String key) {
+        Pattern pattern = Pattern.compile("\"%s\"\\s*:\\s*([0-9.]+)".formatted(key));
+        Matcher matcher = pattern.matcher(body);
+        if (!matcher.find()) {
+            return null;
         }
         return Float.parseFloat(matcher.group(1));
     }
