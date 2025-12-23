@@ -159,8 +159,4 @@ public final class Utils {
     public static final float TG_DESERT_TEMP_MIN = 0.64f;
     public static final float TG_DESERT_MOIST_MAX = 0.30f;
     public static final float TG_FOREST_MOIST_MIN = 0.62f;
-
-    public static final int NEAR_RING_RADIUS_CHUNKS = 10;
-    // Far tiles inside this distance are NOT rendered (prevents far under near).
-    public static final float FAR_HIDE_UNDER_NEAR_EXTRA_BLOCKS = 24f;
 }
