@@ -4,6 +4,10 @@ import org.aouessar.core.math.Mat4;
 import org.aouessar.core.math.Vec3;
 
 import static org.lwjgl.glfw.GLFW.*;
+import static org.lwjgl.opengl.GL11.*;
+import static org.lwjgl.opengl.GL11.GL_FILL;
+import static org.lwjgl.opengl.GL11.GL_FRONT_AND_BACK;
+import static org.lwjgl.opengl.GL11.glPolygonMode;
 
 public final class FlyCamera {
     public final Vec3 position = new Vec3(0, 140, 0);
@@ -16,6 +20,9 @@ public final class FlyCamera {
 
     public float moveSpeed = 40f;
     public float mouseSensitivity = 0.12f; // degrees per pixel
+
+    private boolean wireframe = false;
+    private boolean wireframeKeyPressed = false;
 
     public void handleMouse(long window) {
         double[] mx = new double[1];
@@ -54,6 +61,7 @@ public final class FlyCamera {
         if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) position.sub(new Vec3(right.x, right.y, right.z).mul(speed));
         if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS) position.y += speed;
         if (glfwGetKey(window, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS) position.y -= speed;
+        toggleWireframe(window);
     }
 
     public Vec3 getForward() {
@@ -70,5 +78,25 @@ public final class FlyCamera {
         Vec3 forward = getForward();
         Vec3 center = new Vec3(position.x + forward.x, position.y + forward.y, position.z + forward.z);
         return Mat4.lookAt(position, center, new Vec3(0,1,0));
+    }
+
+
+    void toggleWireframe(long window) {
+        // Press F3 to toggle wireframe (you can change the key)
+        if (glfwGetKey(window, GLFW_KEY_F3) == GLFW_PRESS) {
+            if (!wireframeKeyPressed) {
+                wireframe = !wireframe;
+
+                if (wireframe) {
+                    glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+                } else {
+                    glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+                }
+
+                wireframeKeyPressed = true;
+            }
+        } else {
+            wireframeKeyPressed = false;
+        }
     }
 }

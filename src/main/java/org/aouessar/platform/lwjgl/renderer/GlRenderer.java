@@ -53,6 +53,10 @@ public final class GlRenderer {
     private float camVx, camVz;
     private float camSpeed;
 
+    // ---- NEW: Near coverage set (chunk columns cx,cz currently present on GPU) ----
+    // Rebuilt every frame from gpuMeshes.keySet() so it never becomes "sticky".
+    private final LongSet nearColumns = new LongSet(1 << 16);
+
     public GlRenderer(long window) {
         this.window = window;
 
@@ -69,8 +73,8 @@ public final class GlRenderer {
 
         this.worldHeightChunks = (WORLD_MAX_Y / CHUNK_SIZE) + 2;
 
-        WorldSeed seed = new WorldSeed(555555555L);
-        this.generator = new SimpleWorldGenerator(seed, SEA_LEVEL);
+        WorldSeed seed = new WorldSeed(59789635125L);
+        this.generator = new SimpleWorldGenerator(seed);
 
         world = new StreamingWorld(generator, new GreedyMesher(),
                 Math.max(2, Runtime.getRuntime().availableProcessors() - 1));
@@ -176,14 +180,24 @@ public final class GlRenderer {
         shader.setFloat("uSeaLevel", SEA_LEVEL);
         shader.setFloat("uMaxHeight", WORLD_MAX_Y);
 
-        // draw FAR first
-        for (GlMesh mesh : farGpuMeshes.values()) {
+        // ---- NEW: rebuild near coverage columns from CURRENT gpuMeshes ----
+        // This is the key to avoiding holes and avoiding "missing far after near".
+        rebuildNearColumnsFromGpuMeshes();
+
+        // draw FAR first, but skip far tiles that are fully covered by near chunks
+        for (var entry : farGpuMeshes.entrySet()) {
+            TilePos pos = entry.getKey();
+            GlMesh mesh = entry.getValue();
+
+            // If near fully covers this far tile footprint (8x8 chunk columns), don't draw it.
+            if (isFarTileFullyCoveredByNear(pos)) continue;
+
             if (frustum.aabbVisible(mesh.minX, mesh.minY, mesh.minZ, mesh.maxX, mesh.maxY, mesh.maxZ)) {
                 mesh.draw();
             }
         }
 
-        // draw NEAR after (so near hides far seams)
+        // draw NEAR after (so near hides far seams at the border)
         for (GlMesh mesh : gpuMeshes.values()) {
             if (frustum.aabbVisible(mesh.minX, mesh.minY, mesh.minZ, mesh.maxX, mesh.maxY, mesh.maxZ)) {
                 mesh.draw();
@@ -334,6 +348,110 @@ public final class GlRenderer {
             }
         });
     }
+
+    // -------------------------------------------------------------------------
+    // NEW: Far-under-near suppression (coverage-based, no holes, no missing ring)
+    // -------------------------------------------------------------------------
+
+    private void rebuildNearColumnsFromGpuMeshes() {
+        nearColumns.clear();
+        for (ChunkPos p : gpuMeshes.keySet()) {
+            nearColumns.add(columnKey(p.cx(), p.cz()));
+        }
+    }
+
+    private boolean isFarTileFullyCoveredByNear(TilePos tile) {
+        // Each far tile is TILE_SIZE x TILE_SIZE.
+        // With CHUNK_SIZE=32 and TILE_SIZE=256 => 8 chunks per tile axis.
+        final int chunksPerTile = TILE_SIZE / CHUNK_SIZE;
+
+        int cx0 = tile.tx() * chunksPerTile;
+        int cz0 = tile.tz() * chunksPerTile;
+
+        int cx1 = cx0 + chunksPerTile - 1;
+        int cz1 = cz0 + chunksPerTile - 1;
+
+        for (int cz = cz0; cz <= cz1; cz++) {
+            for (int cx = cx0; cx <= cx1; cx++) {
+                if (!nearColumns.contains(columnKey(cx, cz))) return false;
+            }
+        }
+        return true;
+    }
+
+    private static long columnKey(int cx, int cz) {
+        // pack two ints into one long
+        return (((long) cx) << 32) ^ (cz & 0xffffffffL);
+    }
+
+    // Simple primitive long hash set (no boxing, no per-frame allocations)
+    private static final class LongSet {
+        private long[] keys;
+        private boolean[] used;
+        private int size;
+        private int mask;
+
+        LongSet(int capacityHint) {
+            int cap = 1;
+            while (cap < capacityHint) cap <<= 1;
+            keys = new long[cap];
+            used = new boolean[cap];
+            mask = cap - 1;
+        }
+
+        void clear() {
+            // reset used flags; keeps arrays allocated
+            for (int i = 0; i < used.length; i++) used[i] = false;
+            size = 0;
+        }
+
+        boolean contains(long k) {
+            int i = mix((int)(k ^ (k >>> 32))) & mask;
+            while (used[i]) {
+                if (keys[i] == k) return true;
+                i = (i + 1) & mask;
+            }
+            return false;
+        }
+
+        void add(long k) {
+            if ((size + 1) * 10 >= keys.length * 7) rehash(keys.length << 1);
+
+            int i = mix((int)(k ^ (k >>> 32))) & mask;
+            while (used[i]) {
+                if (keys[i] == k) return;
+                i = (i + 1) & mask;
+            }
+            used[i] = true;
+            keys[i] = k;
+            size++;
+        }
+
+        private void rehash(int newCap) {
+            long[] oldK = keys;
+            boolean[] oldU = used;
+
+            keys = new long[newCap];
+            used = new boolean[newCap];
+            mask = newCap - 1;
+            size = 0;
+
+            for (int i = 0; i < oldK.length; i++) {
+                if (oldU[i]) add(oldK[i]);
+            }
+        }
+
+        private static int mix(int x) {
+            x ^= (x >>> 16);
+            x *= 0x7feb352d;
+            x ^= (x >>> 15);
+            x *= 0x846ca68b;
+            x ^= (x >>> 16);
+            return x;
+        }
+    }
+
+    // -------------------------------------------------------------------------
 
     private static int floorDiv(int a, int b) {
         int r = a / b;

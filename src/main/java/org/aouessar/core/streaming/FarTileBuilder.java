@@ -13,6 +13,10 @@ import static org.aouessar.utils.Utils.*;
 final class FarTileBuilder {
     private FarTileBuilder() {}
 
+    // Far-field snow thresholds (you can move these to Utils.java later if you want)
+    private static final int FAR_SNOW_START_Y = 150; // starts appearing
+    private static final int FAR_SNOW_FULL_Y  = 190; // fully snow
+
     // LOD -> grid step in blocks
     private static int stepForLod(int lod) {
         return switch (lod) {
@@ -63,9 +67,26 @@ final class FarTileBuilder {
                 uv.add(hNorm);
 
                 short topMat;
-                if (h <= seaLevel) topMat = BlockId.WATER;
-                else if (h <= seaLevel + 1) topMat = BlockId.SAND;   // beach band
-                else topMat = BlockId.GRASS;
+                if (h <= seaLevel) {
+                    topMat = BlockId.WATER;
+                } else {
+                    topMat = gen.blockAt(wx, h, wz);
+                }
+
+                // --- Snow on high elevations (optional BlockId.SNOW) ---
+                // If you don't have SNOW in BlockId, SNOW_ID falls back to GRASS automatically.
+                if (topMat != BlockId.WATER) {
+                    // blend in snow with height (no allocations)
+                    if (h >= FAR_SNOW_START_Y) {
+                        if (h >= FAR_SNOW_FULL_Y) {
+                            topMat = BlockId.SNOW;
+                        } else {
+                            // Between start/full: only snow-ify "green" surfaces to avoid turning deserts white
+                            // (desert stays sand). You can broaden this if you want snow on stone too.
+                            if (topMat == BlockId.GRASS) topMat = BlockId.SNOW;
+                        }
+                    }
+                }
 
                 // store as float per vertex
                 mat.add((float) topMat);
@@ -197,7 +218,6 @@ final class FarTileBuilder {
             // indices: connect top edge to bottom edge
             if (i < count - 1) {
                 int top2 = start + (i + 1) * step;
-
                 int bottom2 = bottom + 1;
 
                 // quad as 2 triangles
