@@ -21,6 +21,7 @@ public final class GlRenderer {
     private final long window;
     private final FlyCamera camera = new FlyCamera();
     private final ShaderProgram shader;
+    private final GlTexture atlasTexture;
     private int width = 1280, height = 720;
 
     // World (core)
@@ -53,6 +54,8 @@ public final class GlRenderer {
     private float camVx, camVz;
     private float camSpeed;
 
+    private static final int MAX_MATERIALS = 16;
+
     // ---- NEW: Near coverage set (chunk columns cx,cz currently present on GPU) ----
     // Rebuilt every frame from gpuMeshes.keySet() so it never becomes "sticky".
     private final LongSet nearColumns = new LongSet(1 << 16);
@@ -63,6 +66,13 @@ public final class GlRenderer {
         glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
 
         shader = new ShaderProgram(VS, FS);
+        atlasTexture = new GlTexture("/atlas.png", true);
+
+        TextureAtlas atlas = TextureAtlas.load("/atlas.json");
+        float[] atlasRects = buildAtlasRects(atlas);
+        shader.use();
+        shader.setInt("uAtlas", 0);
+        shader.setVec4Array("uAtlasRects", atlasRects, MAX_MATERIALS);
 
         glfwSetFramebufferSizeCallback(window, (w, newW, newH) -> {
             width = Math.max(newW, 1);
@@ -168,6 +178,7 @@ public final class GlRenderer {
 
         // 4) Render
         shader.use();
+        atlasTexture.bind(0);
         float aspect = (float) width / (float) height;
         Mat4 proj = Mat4.perspective((float) Math.toRadians(75.0), aspect, 0.1f, 5000f);
         Mat4 view = camera.viewMatrix();
@@ -177,8 +188,6 @@ public final class GlRenderer {
 
         shader.setMat4("uVP", vp.m);
         shader.setVec3("uCameraPos", camera.position.x, camera.position.y, camera.position.z);
-        shader.setFloat("uSeaLevel", SEA_LEVEL);
-        shader.setFloat("uMaxHeight", WORLD_MAX_Y);
 
         // ---- NEW: rebuild near coverage columns from CURRENT gpuMeshes ----
         // This is the key to avoiding holes and avoiding "missing far after near".
@@ -467,8 +476,40 @@ public final class GlRenderer {
         for (GlMesh m : gpuMeshes.values()) m.dispose();
         gpuMeshes.clear();
 
+        atlasTexture.dispose();
         shader.dispose();
         world.shutdown();
+    }
+
+    private static float[] buildAtlasRects(TextureAtlas atlas) {
+        float[] rects = new float[MAX_MATERIALS * 4];
+
+        TextureAtlas.Region fallback = atlas.region("dirt");
+        TextureAtlas.Region grass = atlas.regionOrDefault("grass", fallback);
+        TextureAtlas.Region grassSide = atlas.regionOrDefault("grass_side", grass);
+        TextureAtlas.Region stone = atlas.regionOrDefault("stone", fallback);
+        TextureAtlas.Region sand = atlas.regionOrDefault("sand", fallback);
+        TextureAtlas.Region snow = atlas.regionOrDefault("snow", grass);
+        TextureAtlas.Region water = atlas.regionOrDefault("water", atlas.regionOrDefault("glass", fallback));
+
+        setRegion(rects, BlockId.AIR, fallback);
+        setRegion(rects, BlockId.GRASS, grass);
+        setRegion(rects, BlockId.DIRT, fallback);
+        setRegion(rects, BlockId.STONE, stone);
+        setRegion(rects, BlockId.WATER, water);
+        setRegion(rects, BlockId.SAND, sand);
+        setRegion(rects, BlockId.SNOW, snow);
+        setRegion(rects, BlockId.GRASS_SIDE, grassSide);
+
+        return rects;
+    }
+
+    private static void setRegion(float[] rects, int materialId, TextureAtlas.Region region) {
+        int base = materialId * 4;
+        rects[base] = region.u0();
+        rects[base + 1] = region.v0();
+        rects[base + 2] = region.u1();
+        rects[base + 3] = region.v1();
     }
 
     private static final String VS = """
@@ -502,46 +543,11 @@ public final class GlRenderer {
         in vec2 vUv;
         flat in float vMat;
 
+        uniform sampler2D uAtlas;
+        uniform vec4 uAtlasRects[16];
         uniform vec3 uCameraPos;
-        uniform float uSeaLevel;
-        uniform float uMaxHeight;
 
         out vec4 FragColor;
-
-        float hash12(vec2 p) {
-            float h = dot(p, vec2(127.1, 311.7));
-            return fract(sin(h) * 43758.5453123);
-        }
-
-        vec3 materialColor(float id, float hNorm, float biome) {
-            float mid = abs(id);
-
-            if (mid < 0.5) return vec3(0.0);
-
-            if (mid < 1.5) { // GRASS
-                vec3 plains   = vec3(0.18, 0.70, 0.24);
-                vec3 forest   = vec3(0.10, 0.45, 0.14);
-                vec3 mountain = vec3(0.55, 0.55, 0.58);
-                vec3 snow     = vec3(0.92, 0.92, 0.95);
-
-                vec3 base = mix(plains, forest, biome);
-
-                float m = smoothstep(0.55, 0.75, hNorm);
-                base = mix(base, mountain, m);
-
-                float s = smoothstep(0.78, 0.92, hNorm);
-                base = mix(base, snow, s);
-
-                return base;
-            }
-
-            if (mid < 2.5) return vec3(0.50, 0.32, 0.16); // DIRT
-            if (mid < 3.5) return vec3(0.62, 0.62, 0.66); // STONE
-            if (mid < 4.5) return vec3(0.10, 0.35, 0.75); // WATER
-            if (mid < 5.5) return vec3(0.78, 0.72, 0.45); // SAND
-
-            return vec3(1.0, 0.0, 1.0);
-        }
 
         void main() {
             vec3 n = normalize(vNrm);
@@ -552,11 +558,13 @@ public final class GlRenderer {
             float upness = clamp(dot(n, vec3(0,1,0)), 0.0, 1.0);
             float slopeDark = mix(0.65, 1.0, upness);
 
-            float hNorm = clamp((vWorldPos.y - uSeaLevel) / (uMaxHeight - uSeaLevel), 0.0, 1.0);
-            vec2 bCell = floor(vWorldPos.xz / 128.0);
-            float biome = hash12(bCell);
+            int mat = int(vMat + 0.5);
+            mat = clamp(mat, 0, 15);
+            vec4 rect = uAtlasRects[mat];
+            vec2 uv = mix(rect.xy, rect.zw, fract(vUv));
+            vec3 baseColor = texture(uAtlas, uv).rgb;
 
-            vec3 color = materialColor(vMat, hNorm, biome) * ndl * slopeDark;
+            vec3 color = baseColor * ndl * slopeDark;
 
             float dist = length(vWorldPos - uCameraPos);
             float camAlt = uCameraPos.y;

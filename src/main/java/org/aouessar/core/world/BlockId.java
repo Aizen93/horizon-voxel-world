@@ -17,4 +17,6 @@ public final class BlockId {
     public static final short SAND = 5;
 
     public static final short SNOW = 6;
+
+    public static final short GRASS_SIDE = 7;
 }
