@@ -561,7 +561,13 @@ public final class GlRenderer {
             int mat = int(vMat + 0.5);
             mat = clamp(mat, 0, 15);
             vec4 rect = uAtlasRects[mat];
-            vec2 uv = mix(rect.xy, rect.zw, fract(vUv));
+
+            vec2 tileUv = vUv;
+            if (any(greaterThan(abs(vUv), vec2(1.0)))) {
+                tileUv = fract(vUv);
+            }
+
+            vec2 uv = mix(rect.xy, rect.zw, tileUv);
             vec3 baseColor = texture(uAtlas, uv).rgb;
 
             vec3 color = baseColor * ndl * slopeDark;
