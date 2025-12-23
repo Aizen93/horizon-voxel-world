@@ -21,16 +21,23 @@ final class TextureAtlas {
     static TextureAtlas load(String resourcePath) {
         String json = readResource(resourcePath);
         String tilesBody = extractObject(json, "\"tiles\"");
+        float atlasWidth = readNumber(json, "atlasWidth");
+        float atlasHeight = readNumber(json, "atlasHeight");
 
         Map<String, Region> regions = new HashMap<>();
         Matcher matcher = TILE_ENTRY.matcher(tilesBody);
         while (matcher.find()) {
             String name = matcher.group(1);
             String body = matcher.group(2);
-            float u0 = readFloat(body, "u0");
-            float v0 = readFloat(body, "v0");
-            float u1 = readFloat(body, "u1");
-            float v1 = readFloat(body, "v1");
+            float x = readNumber(body, "x");
+            float y = readNumber(body, "y");
+            float w = readNumber(body, "w");
+            float h = readNumber(body, "h");
+
+            float u0 = x / atlasWidth;
+            float u1 = (x + w) / atlasWidth;
+            float v0 = 1f - (y + h) / atlasHeight;
+            float v1 = 1f - y / atlasHeight;
             regions.put(name, new Region(u0, v0, u1, v1));
         }
 
@@ -88,7 +95,7 @@ final class TextureAtlas {
         throw new IllegalStateException("Unterminated object for " + keyLiteral);
     }
 
-    private static float readFloat(String body, String key) {
+    private static float readNumber(String body, String key) {
         Pattern pattern = Pattern.compile("\"%s\"\\s*:\\s*([0-9.]+)".formatted(key));
         Matcher matcher = pattern.matcher(body);
         if (!matcher.find()) {

@@ -66,7 +66,7 @@ public final class GlRenderer {
         glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
 
         shader = new ShaderProgram(VS, FS);
-        atlasTexture = new GlTexture("/atlas.png", true);
+        atlasTexture = new GlTexture("/atlas.png", false);
 
         TextureAtlas atlas = TextureAtlas.load("/atlas.json");
         float[] atlasRects = buildAtlasRects(atlas);
