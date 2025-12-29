@@ -155,6 +155,13 @@ public final class GreedyMesher implements Mesher {
         if (materialId == BlockId.GRASS) {
             boolean isTopFace = (d == 1) && positive; // +Y
             if (!isTopFace) {
+                materialId = BlockId.GRASS_SIDE;
+            }
+        }
+
+        if (materialId == BlockId.GRASS_SIDE) {
+            boolean isBottomFace = (d == 1) && !positive;
+            if (isBottomFace) {
                 materialId = BlockId.DIRT;
             }
         }

@@ -60,6 +60,21 @@ public final class ShaderProgram {
         glUniform1f(loc, v);
     }
 
+    public void setInt(String name, int v) {
+        int loc = glGetUniformLocation(programId, name);
+        if (loc < 0) return;
+        glUniform1i(loc, v);
+    }
+
+    public void setVec4Array(String name, float[] data, int count) {
+        int loc = glGetUniformLocation(programId, name + "[0]");
+        if (loc < 0) return;
+        FloatBuffer fb = memAllocFloat(count * 4);
+        fb.put(data, 0, count * 4).flip();
+        glUniform4fv(loc, fb);
+        memFree(fb);
+    }
+
     public void dispose() {
         glDeleteProgram(programId);
     }

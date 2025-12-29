@@ -59,12 +59,8 @@ final class FarTileBuilder {
                 pos.add((float) h - FAR_Y_BIAS);
                 pos.add((float) wz);
 
-                // biome noise in uv.x, normalized height in uv.y
-                float biome = biomeNoise01(wx >> FAR_BIOME_SHIFT, wz >> FAR_BIOME_SHIFT); // 0..1
-                float hNorm = clamp01((h - FAR_HEIGHT_NORM_MIN) / FAR_HEIGHT_NORM_RANGE); // 0..1
-
-                uv.add(biome);
-                uv.add(hNorm);
+                uv.add((float) wx);
+                uv.add((float) wz);
 
                 short topMat;
                 if (h <= seaLevel) {
@@ -227,16 +223,4 @@ final class FarTileBuilder {
         }
     }
 
-    private static float clamp01(float v) {
-        return v < 0f ? 0f : (v > 1f ? 1f : v);
-    }
-
-    // Fast deterministic hash noise (value noise-ish), good enough for biomes
-    private static float biomeNoise01(int x, int z) {
-        int n = x * 374761393 + z * 668265263; // large primes
-        n = (n ^ (n >> 13)) * 1274126177;
-        n = n ^ (n >> 16);
-        // convert to 0..1
-        return (n & 0x7fffffff) / 2147483647.0f;
-    }
 }
